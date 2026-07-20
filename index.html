@@ -1472,25 +1472,37 @@ var DATA={"FSM": {"name": "Micronesia (Federated States)", "leg": {"office": "Co
       if(x<b[0])b[0]=x;if(y<b[1])b[1]=y;if(x>b[2])b[2]=x;if(y>b[3])b[3]=y;}}return b;}
   function inBBox(pt,b){return pt[0]>=b[0]&&pt[0]<=b[2]&&pt[1]>=b[1]&&pt[1]<=b[3];}
   function ensureRep(f){if(f&&f.geometry&&!f._rep)f._rep=repPoint(f.geometry);}
+  // An antimeridian-spanning feature (e.g. Russia's Chukotka, Alaska, Fiji) has coords on both sides of
+  // \u00b1180. The built-in country polygon is stored raw, so a point-in-polygon test on a click over the
+  // drawn (eastward-shifted) subunit fails. uwGeom returns a cached copy of the geometry with the minority
+  // side shifted \u00b1360 into one continuous frame; it never mutates f.geometry (the country layer draws that).
+  function uwGeom(f){if(!f||!f.geometry)return f&&f.geometry;if(f._uwGeom!==undefined)return f._uwGeom;
+    var g=f.geometry,lo=1e9,hi=-1e9;(function sc(c){if(typeof c[0]==='number'){if(c[0]<lo)lo=c[0];if(c[0]>hi)hi=c[0];}else for(var i=0;i<c.length;i++)sc(c[i]);})(g.coordinates);
+    if(hi>170&&lo<-170){var u=JSON.parse(JSON.stringify(g));(function sh(c){if(typeof c[0]==='number'){if(c[0]<0)c[0]+=360;}else for(var i=0;i<c.length;i++)sh(c[i]);})(u.coordinates);f._uwGeom=u;}
+    else f._uwGeom=g;
+    return f._uwGeom;}
+  // map a raw click longitude into the (possibly shifted) frame of feature f, so inPoly matches uwGeom(f)
+  function normLng(lng,f){var g=uwGeom(f);var b=g._bb||(g._bb=bboxOf(g));
+    if(b[2]>180&&lng<0)return lng+360;if(b[0]<-180&&lng>0)return lng-360;return lng;}
   // children of parentFeat: strict polygon containment, with a bbox fallback when the strict test
   // finds nothing (handles slight geometry mismatch between geoBoundaries and OpenStreetMap layers).
   function navWraps(f){if(!f||!f.geometry)return false;var b=f._bbox||(f._bbox=bboxOf(f.geometry));return (b[2]-b[0])>180;}
   // fraction of a child's interior sample points that fall inside the parent polygon (0..1)
   function _samples(f){ensureRep(f);var g=f.geometry;if(!g)return[];var b=f._bbox||(f._bbox=bboxOf(g));
-    var pts=f._rep?[f._rep]:[];for(var ix=1;ix<=3;ix++)for(var iy=1;iy<=3;iy++){
-      var x=b[0]+(b[2]-b[0])*ix/4,y=b[1]+(b[3]-b[1])*iy/4;if(inPoly([x,y],g))pts.push([x,y]);}return pts;}
+    var pts=f._rep?[f._rep]:[],N=7;for(var ix=1;ix<N;ix++)for(var iy=1;iy<N;iy++){
+      var x=b[0]+(b[2]-b[0])*ix/N,y=b[1]+(b[3]-b[1])*iy/N;if(inPoly([x,y],g))pts.push([x,y]);}return pts;}
   function fracInside(f,pg){var s=_samples(f);if(!s.length)return 0;var n=0;for(var i=0;i<s.length;i++)if(inPoly(s[i],pg))n++;return n/s.length;}
   function _bbHit(a,b){return a[0]<=b[2]&&a[2]>=b[0]&&a[1]<=b[3]&&a[3]>=b[1];}
   function kidsInside(features,parentFeat){
     var pg=parentFeat.geometry, pb=parentFeat._bbox||(parentFeat._bbox=bboxOf(pg));
-    // strict: rep-point inside the parent, then drop any that barely overlap it (a cross-source offset
-    // can drop a neighbour's rep point inside an over-sized parent polygon)
+    // A cross-source offset (geoBoundaries parent vs OSM child) can drop a neighbour's rep point just
+    // inside an over-sized parent polygon, so a rep-in-parent test alone leaks adjacent units. Start from
+    // the rep-inside set when it exists, otherwise every bbox-overlapping unit, then keep only children
+    // whose interior MOSTLY lies inside the parent. No unfiltered fallback \u2014 that is what leaked before.
     var strict=features.filter(function(f){return f!==parentFeat&&inPoly(f._rep,pg);});
-    if(strict.length){var s2=strict.filter(function(f){return fracInside(f,pg)>=0.4;});return s2.length?s2:strict;}
-    // tolerant fallback (geoBoundaries<->OSM mismatch): keep only children whose interior MOSTLY lies inside
-    // the parent \u2014 replaces the old bounding-box test, which leaked neighbouring units at the box corners.
-    return features.filter(function(f){if(f===parentFeat)return false;
-      var b=f._bbox||(f._bbox=bboxOf(f.geometry));if(!_bbHit(b,pb))return false;return fracInside(f,pg)>=0.5;});
+    var pool=strict.length?strict:features.filter(function(f){if(f===parentFeat)return false;
+      var b=f._bbox||(f._bbox=bboxOf(f.geometry));return _bbHit(b,pb);});
+    return pool.filter(function(f){return fracInside(f,pg)>=0.6;});
   }
 
   // ---- unified click-drill: click a boundary to enter it, click outside to go back up ----
@@ -1593,10 +1605,10 @@ var DATA={"FSM": {"name": "Micronesia (Federated States)", "leg": {"office": "Co
   map.on('click',function(e){                   // click outside the current region → up one level
     if(navClickFlag){navClickFlag=false;return;}
     if(!nav||!navStack.length)return;
-    var pt=[e.latlng.lng,e.latlng.lat], top=navStack[navStack.length-1];
-    var wrap=top.feat&&navWraps(top.feat);   // antimeridian-spanning region (e.g. Alaska): inPoly is unreliable
-    if(top.type==='country'){if(wrap||!inPoly(pt,top.feat.geometry))toWorld();return;}
-    if(!wrap&&inPoly(pt,top.feat.geometry))return;     // empty gap inside region → ignore
+    var top=navStack[navStack.length-1];
+    var g=uwGeom(top.feat), pt=[normLng(e.latlng.lng,top.feat),e.latlng.lat];  // unwrap antimeridian regions so inPoly is reliable
+    if(top.type==='country'){if(!inPoly(pt,g))toWorld();return;}
+    if(inPoly(pt,g))return;                            // empty gap inside region → ignore
     navStack.pop(); navPanelForTop(); navShow(false);
   });
   map.on('zoomend',function(){if(Date.now()-lastFit<1500)return;if(nav&&map.getZoom()<=2.7)toWorld();});  // back at global scale → clickable world

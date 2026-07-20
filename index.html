@@ -1475,11 +1475,22 @@ var DATA={"FSM": {"name": "Micronesia (Federated States)", "leg": {"office": "Co
   // children of parentFeat: strict polygon containment, with a bbox fallback when the strict test
   // finds nothing (handles slight geometry mismatch between geoBoundaries and OpenStreetMap layers).
   function navWraps(f){if(!f||!f.geometry)return false;var b=f._bbox||(f._bbox=bboxOf(f.geometry));return (b[2]-b[0])>180;}
+  // fraction of a child's interior sample points that fall inside the parent polygon (0..1)
+  function _samples(f){ensureRep(f);var g=f.geometry;if(!g)return[];var b=f._bbox||(f._bbox=bboxOf(g));
+    var pts=f._rep?[f._rep]:[];for(var ix=1;ix<=3;ix++)for(var iy=1;iy<=3;iy++){
+      var x=b[0]+(b[2]-b[0])*ix/4,y=b[1]+(b[3]-b[1])*iy/4;if(inPoly([x,y],g))pts.push([x,y]);}return pts;}
+  function fracInside(f,pg){var s=_samples(f);if(!s.length)return 0;var n=0;for(var i=0;i<s.length;i++)if(inPoly(s[i],pg))n++;return n/s.length;}
+  function _bbHit(a,b){return a[0]<=b[2]&&a[2]>=b[0]&&a[1]<=b[3]&&a[3]>=b[1];}
   function kidsInside(features,parentFeat){
-    var strict=features.filter(function(f){return f!==parentFeat&&inPoly(f._rep,parentFeat.geometry);});
-    if(strict.length)return strict;
-    var bb=parentFeat._bbox||(parentFeat._bbox=bboxOf(parentFeat.geometry));
-    return features.filter(function(f){return f!==parentFeat&&inBBox(f._rep,bb);});
+    var pg=parentFeat.geometry, pb=parentFeat._bbox||(parentFeat._bbox=bboxOf(pg));
+    // strict: rep-point inside the parent, then drop any that barely overlap it (a cross-source offset
+    // can drop a neighbour's rep point inside an over-sized parent polygon)
+    var strict=features.filter(function(f){return f!==parentFeat&&inPoly(f._rep,pg);});
+    if(strict.length){var s2=strict.filter(function(f){return fracInside(f,pg)>=0.4;});return s2.length?s2:strict;}
+    // tolerant fallback (geoBoundaries<->OSM mismatch): keep only children whose interior MOSTLY lies inside
+    // the parent \u2014 replaces the old bounding-box test, which leaked neighbouring units at the box corners.
+    return features.filter(function(f){if(f===parentFeat)return false;
+      var b=f._bbox||(f._bbox=bboxOf(f.geometry));if(!_bbHit(b,pb))return false;return fracInside(f,pg)>=0.5;});
   }
 
   // ---- unified click-drill: click a boundary to enter it, click outside to go back up ----

@@ -1636,7 +1636,7 @@ var DATA={"FSM": {"name": "Micronesia (Federated States)", "leg": {"office": "Co
     openUnit(nav.iso,nav.cname,(isAdm4?'ADM4':lvl),childName(feat),bounds);
     navChildren(entry,function(res){
       hideLoad();
-      if(!res){hint('No further sub-divisions for '+childName(feat)+' \u2014 this is the lowest mapped tier for it.');return;} // leaf
+      if(!res){hint('No mapped subdivisions in the open dataset for '+childName(feat)+'.');return;} // leaf
       navStack.push(entry); navRender(res,bounds); navCrumb();
     });
   }

@@ -1483,7 +1483,7 @@ var DATA={"FSM": {"name": "Micronesia (Federated States)", "leg": {"office": "Co
   }
 
   // ---- unified click-drill: click a boundary to enter it, click outside to go back up ----
-  var nav=null, navStack=[], navClickFlag=false;
+  var nav=null, navStack=[], navClickFlag=false, lastFit=0, noData={};
   var RELABEL={PRY:{'ALTO PARAGUAY':'Alto Paraguay','ALTO PARANA':'Alto Paraná','AMAMBAY':'Amambay','ASUNCION':'Asunción','BOQUERON':'Boquerón','CAAGUAZU':'Caaguazú','CAAZAPA':'Caazapá','CANINDEYU':'Canindeyú','CENTRAL':'Central','CONCEPCION':'Concepción','CORDILLERA':'Cordillera','GUAIRA':'Guairá','ITAPUA':'Itapúa','MISIONES':'Misiones','PARAGUARI':'Paraguarí','PRESIDENTE HAYES':'Presidente Hayes','SAN PEDRO':'San Pedro','ÑEEMBUCU':'Ñeembucú',},VNM:{'Hà Nội\t':'Hà Nội'},CHN:{'Guangzhou Province':'Guangdong Province'},EGY:{'Luxor Governate':'Luxor Governorate','Minya Governate':'Minya Governorate'},KEN:{'Tharaka':'Tharaka-Nithi'},ZAF:{'Nothern Cape':'Northern Cape'},ETH:{'Beneshangul Gumu':'Benishangul-Gumuz','Hareri':'Harari'},ARG:{'La Roja':'La Rioja'},BRA:{'Rio de Jeneiro':'Rio de Janeiro','Rio Granda do Norte':'Rio Grande do Norte'}}; // RELABEL[ISO3]={rawShapeName:"Latin label",...}  sourced romanisations only
   function fixEnc(s){ // repair UTF-8 mis-decoded as Latin-1 (mojibake like "Regi\u00c3\u00b3n" -> "Regi\u00f3n")
     if(!s)return s;
@@ -1506,10 +1506,18 @@ var DATA={"FSM": {"name": "Micronesia (Federated States)", "leg": {"office": "Co
       nav.adm4={byLevel:byLevel,levels:Object.keys(lv).map(Number).sort(function(a,b){return a-b;})};cb(true);
     }).catch(function(){cb(false);});
   }
+  // area of a feature's outer rings (deg^2) — used to spot a child that merely reproduces its parent
+  function _geomArea(geom){if(!geom)return 0;var polys=geom.type==='Polygon'?[geom.coordinates]:geom.coordinates,a=0;
+    for(var p=0;p<polys.length;p++){if(polys[p]&&polys[p][0])a+=ringArea(polys[p][0]);}return a;}
+  // a self-duplicate = a single child that fills ~the whole parent (e.g. an OSM "X County" unit
+  // sitting on top of the geoBoundaries county "X"). Real sub-units are far smaller, so an area
+  // ratio near 1 reliably flags the redundant twin without touching genuine same-named cities.
+  function selfDup(kid,parent){if(!kid||!parent||kid===parent)return false;
+    try{var pa=_geomArea(parent.geometry);if(pa>0){var r=_geomArea(kid.geometry)/pa;if(r>0.82)return true;}}catch(e){}return false;}
   function adm4Inside(parentFeat,afterLevel){ // coarsest internal level > afterLevel whose units sit inside parentFeat
     var levels=nav.adm4.levels;
     for(var k=0;k<levels.length;k++){var LL=levels[k]; if(afterLevel!=null&&LL<=afterLevel)continue;
-      var kids=kidsInside(nav.adm4.byLevel[LL],parentFeat);
+      var kids=kidsInside(nav.adm4.byLevel[LL],parentFeat).filter(function(f){return !selfDup(f,parentFeat);});
       if(kids.length)return{lvl:LL,feats:kids};
     }
     return null;
@@ -1525,13 +1533,13 @@ var DATA={"FSM": {"name": "Micronesia (Federated States)", "leg": {"office": "Co
     (function tryNext(i){
       if(i>=tries.length){cb(null);return;}
       var L=tries[i];
-      if(L==='ADM3'&&!ADM3_ISO[iso]){tryNext(i+1);return;}
-      if(L==='ADM4'){ if(!ADM4_ISO[iso]){cb(null);return;}
-        navLoadAdm4(function(ok){if(!ok){cb(null);return;}var r=adm4Inside(top.feat,null);if(r)cb({lvl:r.lvl,feats:r.feats,isAdm4:true});else tryNext(i+1);}); return; }
+      if(L==='ADM3'&&noData[iso+'3']){tryNext(i+1);return;}                 // only skip once we've learned there's no data
+      if(L==='ADM4'){ if(noData[iso+'4']){cb(null);return;}
+        navLoadAdm4(function(ok){if(!ok){noData[iso+'4']=1;cb(null);return;}var r=adm4Inside(top.feat,null);if(r)cb({lvl:r.lvl,feats:r.feats,isAdm4:true});else tryNext(i+1);}); return; }
       fetchLevel(iso,L).then(function(geo){var fs=geo.features||[];fs.forEach(ensureRep);
-        var kids=kidsInside(fs,top.feat);
+        var kids=kidsInside(fs,top.feat).filter(function(f){return !selfDup(f,top.feat);});
         if(kids.length)cb({lvl:L,feats:kids,isAdm4:false});else tryNext(i+1);
-      }).catch(function(){tryNext(i+1);});
+      }).catch(function(){noData[iso+(L==='ADM3'?'3':'4')]=1;tryNext(i+1);});
     })(0);
   }
   function navRender(res,fitB){
@@ -1546,7 +1554,7 @@ var DATA={"FSM": {"name": "Micronesia (Federated States)", "leg": {"office": "Co
     adminLayer.on('click',function(e){navClickFlag=true;navDescend(res.lvl,res.isAdm4,e.layer.feature,e.layer.getBounds());});
     var _lb=adminLayer.getBounds(), _fb=fitB;
     if(!_fb||(_fb.getEast&&(_fb.getEast()-_fb.getWest())>180)) _fb=_lb;   // antimeridian/globe-spanning country bounds -> fit the actual (unwrapped) layer
-    try{map.fitBounds(_fb,{padding:[20,20]});}catch(e){try{map.fitBounds(_lb,{padding:[20,20]});}catch(e2){}}
+    lastFit=Date.now();try{map.fitBounds(_fb,{padding:[20,20]});}catch(e){try{map.fitBounds(_lb,{padding:[20,20]});}catch(e2){}}
   }
   function navShow(firstHint){
     var top=navStack[navStack.length-1]; if(!top)return;
@@ -1580,7 +1588,7 @@ var DATA={"FSM": {"name": "Micronesia (Federated States)", "leg": {"office": "Co
     if(!wrap&&inPoly(pt,top.feat.geometry))return;     // empty gap inside region → ignore
     navStack.pop(); navPanelForTop(); navShow(false);
   });
-  map.on('zoomend',function(){if(nav&&map.getZoom()<=2.7)toWorld();});  // back at global scale → clickable world
+  map.on('zoomend',function(){if(Date.now()-lastFit<1500)return;if(nav&&map.getZoom()<=2.7)toWorld();});  // back at global scale → clickable world
   function navCrumb(){
     var items=[['World',function(){toWorld();}]];
     navStack.forEach(function(en,idx){items.push([en.type==='country'?nav.cname:childName(en.feat),function(){navPopTo(idx);}]);});
@@ -1665,11 +1673,11 @@ var DATA={"FSM": {"name": "Micronesia (Federated States)", "leg": {"office": "Co
 
   function openCountry(f){if(!f)return;mode='country';curFeat=f;resetTabs();panel.classList.add('open');
     var iso=f.id,nm=(DATA[iso]&&DATA[iso].name)||f.properties.name;
-    try{map.fitBounds(featBounds(f),{maxZoom:5,padding:[50,50]});}catch(e){}render();}
+    lastFit=Date.now();try{map.fitBounds(featBounds(f),{maxZoom:5,padding:[50,50]});}catch(e){}render();}
   function featBounds(f){try{var lo=Infinity,hi=-Infinity;(function scan(c){if(typeof c[0]==='number'){if(c[0]<lo)lo=c[0];if(c[0]>hi)hi=c[0];}else{for(var i=0;i<c.length;i++)scan(c[i]);}})(f.geometry.coordinates);if(hi-lo>180){var g=JSON.parse(JSON.stringify(f));(function sh(c){if(typeof c[0]==='number'){if(c[0]<0)c[0]+=360;}else{for(var i=0;i<c.length;i++)sh(c[i]);}})(g.geometry.coordinates);return L.geoJSON(g).getBounds();}}catch(e){}return L.geoJSON(f).getBounds();}
 
   function openUnit(iso,cname,lvl,nm,bounds){mode='unit';curUnit={iso:iso,cname:cname,lvl:lvl,nm:nm,bounds:bounds};
-    resetTabs();panel.classList.add('open');try{map.fitBounds(bounds,{maxZoom:9,padding:[30,30]});}catch(e){}render();}
+    resetTabs();panel.classList.add('open');lastFit=Date.now();try{map.fitBounds(bounds,{maxZoom:9,padding:[30,30]});}catch(e){}render();}
 
   var TABDEF={leg:'<b>The lawmakers.</b> Elected to write the rules — this tab is how you get one of those seats.',exe:'<b>The leaders who carry the laws out.</b> Directly elected, chosen by the assembly you elect, or appointed from above — this tab says which.',jud:'<b>The judges.</b> They interpret and apply the law — and almost everywhere they are appointed, not elected.',civ:'<b>The permanent government staff.</b> Hired on merit rather than elected — they stay when governments change.'};
   function branchHTML(b,name){

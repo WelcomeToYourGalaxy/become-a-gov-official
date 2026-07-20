@@ -691,10 +691,16 @@ svg.leaflet-image-layer.leaflet-interactive path {
   #legend{position:absolute;left:14px;bottom:84px;z-index:600;background:rgba(16,21,31,.92);border:1px solid var(--line);
     border-radius:0;padding:9px 11px;font-size:11px;color:var(--mut);max-width:250px}
   #legend b{color:var(--txt)}
-  #panel{position:absolute;top:0;right:0;bottom:0;width:400px;max-width:94vw;z-index:700;background:var(--panel);
-    border-left:1px solid var(--line);transform:translateX(102%);transition:transform .26s;display:flex;flex-direction:column}
-  #panel.open{transform:translateX(0)}
-  #ph{padding:16px 16px 10px;border-bottom:1px solid var(--line);position:relative}
+  #panel{position:absolute;left:50%;top:52%;transform:translate(-50%,-50%);width:400px;max-width:94vw;max-height:74%;z-index:700;background:var(--panel);
+    border:1px solid var(--line);box-shadow:0 12px 40px rgba(0,0,0,.55);display:none;flex-direction:column}
+  #panel.open{display:flex}
+  #panel.dragging{opacity:.97}
+  #pgrip{position:absolute;left:12px;top:16px;color:var(--mut);cursor:move;line-height:0;opacity:.85}
+  #basetoggle{position:absolute;top:14px;right:14px;z-index:620;display:flex;border:1px solid var(--line);background:rgba(12,28,18,.92);overflow:hidden}
+  #basetoggle button{background:transparent;color:var(--mut);border:0;border-left:1px solid var(--line);padding:6px 11px;font:inherit;font-size:12px;cursor:pointer;line-height:1}
+  #basetoggle button:first-child{border-left:0}
+  #basetoggle button.on{background:var(--accent);color:#06231a;font-weight:600}
+  #ph{padding:16px 16px 10px 34px;border-bottom:1px solid var(--line);position:relative;cursor:move;user-select:none}
   #ph h2{margin:0;font-size:19px} #ph .sub{color:var(--mut);font-size:12px;margin-top:3px}
   #close{position:absolute;top:12px;right:12px;cursor:pointer;color:var(--mut);border:1px solid var(--line);
     border-radius:0;width:28px;height:28px;line-height:26px;text-align:center;font-size:16px;background:var(--panel2)}
@@ -746,11 +752,10 @@ svg.leaflet-image-layer.leaflet-interactive path {
   <div id="bar"><div id="title">How to Become a Government Official</div><div id="subtitle">Click on a country on the map to explore its regions, then keep clicking a boundary to go deeper, or click outside it to come back up.</div></div>
   <div id="crumb"></div>
   <div id="load"><span class="sp"></span><span id="loadtxt">Loading…</span></div>
-  <div id="legend"><b>How this works</b><br>Country shapes are built in; each country's regions and districts load on demand from
-    <b>your GitHub repo</b> — so the file stays tiny and Weebly-friendly.<br>
-    <span style="color:var(--sub)">Boundaries: geoBoundaries (CC BY 4.0) & OpenStreetMap (ODbL) · Satellite: Esri</span></div>
+  <div id="legend"><span style="color:var(--sub)">Boundaries: geoBoundaries (CC BY 4.0) & OpenStreetMap (ODbL) · Satellite: Esri</span></div>
+  <div id="basetoggle" role="group" aria-label="Base map"><button id="bt-sat" class="on" type="button">Satellite</button><button id="bt-pol" type="button">Political</button></div>
   <div id="panel">
-    <div id="ph"><div id="close">&times;</div><h2 id="pname">—</h2><div class="sub" id="psub"></div></div>
+    <div id="ph"><span id="pgrip" title="Drag to move"><svg width="12" height="18" viewBox="0 0 12 18" aria-hidden="true"><g fill="currentColor"><circle cx="3" cy="3" r="1.4"/><circle cx="9" cy="3" r="1.4"/><circle cx="3" cy="9" r="1.4"/><circle cx="9" cy="9" r="1.4"/><circle cx="3" cy="15" r="1.4"/><circle cx="9" cy="15" r="1.4"/></g></svg></span><div id="close">&times;</div><h2 id="pname">—</h2><div class="sub" id="psub"></div></div>
     <div id="tabs"><div class="tab active" data-b="leg" title="The lawmakers — elected to write the rules.">Legislative</div><div class="tab" data-b="exe" title="The leaders who carry the laws out.">Executive</div><div class="tab" data-b="jud" title="The judges — they interpret and apply the law.">Judicial</div><div class="tab" data-b="civ" title="The permanent government staff — hired on merit, not elected.">Civil Service</div></div>
     <div id="pbody"></div>
   </div>
@@ -1416,9 +1421,19 @@ var DATA={"FSM": {"name": "Micronesia (Federated States)", "leg": {"office": "Co
   var adm4Canvas=L.canvas({padding:0.5,pane:'adm4pane'});
   function levelColor(l){l=+l||6;return l<=6?'#7fd1ae':l===7?'#9ccaff':l===8?'#c3a6ff':l===9?'#ffd27f':l===10?'#ff9e9e':'#ff7fce';}
   map.setMaxBounds([[-85,-200],[85,200]]);
-  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    {attribution:'Imagery &copy; Esri | Boundaries: geoBoundaries (CC BY 4.0), OpenStreetMap (ODbL)',maxZoom:12}).addTo(map);
-  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',{maxZoom:12,opacity:0.9}).addTo(map);
+  var satBase=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    {attribution:'Imagery &copy; Esri | Boundaries: geoBoundaries (CC BY 4.0), OpenStreetMap (ODbL)',maxZoom:12});
+  var satLabels=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',{maxZoom:12,opacity:0.9});
+  var polBase=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+    {attribution:'Map &copy; Esri | Boundaries: geoBoundaries (CC BY 4.0), OpenStreetMap (ODbL)',maxZoom:12});
+  satBase.addTo(map); satLabels.addTo(map);
+  function setBasemap(mode){
+    if(mode==='pol'){ if(map.hasLayer(satBase))map.removeLayer(satBase); if(map.hasLayer(satLabels))map.removeLayer(satLabels); if(!map.hasLayer(polBase))polBase.addTo(map); if(polBase.bringToBack)polBase.bringToBack(); }
+    else { if(map.hasLayer(polBase))map.removeLayer(polBase); if(!map.hasLayer(satBase))satBase.addTo(map); if(!map.hasLayer(satLabels))satLabels.addTo(map); if(satBase.bringToBack)satBase.bringToBack(); }
+  }
+  (function(){var bs=document.getElementById('bt-sat'),bp=document.getElementById('bt-pol');
+    function sel(m){setBasemap(m);if(bs)bs.classList.toggle('on',m!=='pol');if(bp)bp.classList.toggle('on',m==='pol');}
+    if(bs)bs.onclick=function(){sel('sat');};if(bp)bp.onclick=function(){sel('pol');};})();
 
   var countryLayer=L.geoJSON(WORLD,{style:function(){return{color:'#5cbf90',weight:0.7,fillColor:'#1f6b45',fillOpacity:0.35};},
     onEachFeature:function(f,l){var nm=(DATA[f.id]&&DATA[f.id].name)||f.properties.name;
@@ -1734,16 +1749,32 @@ var DATA={"FSM": {"name": "Micronesia (Federated States)", "leg": {"office": "Co
   var mode='country',activeBranch='leg',curFeat=null,curUnit=null;
   document.getElementById('close').onclick=closePanel;
   function closePanel(){panel.classList.remove('open');}
+  function centerPanel(){panel.style.left='';panel.style.top='';panel.style.transform='';}
+  (function(){var ph=document.getElementById('ph'),box=document.getElementById('app'),drag=false,ox=0,oy=0;if(!ph||!box)return;
+    function down(e){if(e.target&&(e.target.id==='close'||e.target.closest&&e.target.closest('#close')))return;var t=e.touches?e.touches[0]:e;
+      var pr=panel.getBoundingClientRect(),br=box.getBoundingClientRect();
+      panel.style.transform='none';panel.style.left=(pr.left-br.left)+'px';panel.style.top=(pr.top-br.top)+'px';
+      ox=t.clientX-pr.left;oy=t.clientY-pr.top;drag=true;panel.classList.add('dragging');
+      document.addEventListener('mousemove',move);document.addEventListener('mouseup',up);
+      document.addEventListener('touchmove',move,{passive:false});document.addEventListener('touchend',up);e.preventDefault();}
+    function move(e){if(!drag)return;var t=e.touches?e.touches[0]:e;var br=box.getBoundingClientRect();
+      var x=t.clientX-br.left-ox,y=t.clientY-br.top-oy;
+      x=Math.max(6,Math.min(x,br.width-panel.offsetWidth-6));y=Math.max(6,Math.min(y,br.height-panel.offsetHeight-6));
+      panel.style.left=x+'px';panel.style.top=y+'px';if(e.cancelable)e.preventDefault();}
+    function up(){drag=false;panel.classList.remove('dragging');
+      document.removeEventListener('mousemove',move);document.removeEventListener('mouseup',up);
+      document.removeEventListener('touchmove',move);document.removeEventListener('touchend',up);}
+    ph.addEventListener('mousedown',down);ph.addEventListener('touchstart',down,{passive:false});})();
   tabs.forEach(function(t){t.onclick=function(){tabs.forEach(function(x){x.classList.remove('active')});t.classList.add('active');activeBranch=t.getAttribute('data-b');render();};});
   function resetTabs(){tabs.forEach(function(x){x.classList.remove('active')});tabs[0].classList.add('active');activeBranch='leg';}
 
-  function openCountry(f){if(!f)return;mode='country';curFeat=f;resetTabs();panel.classList.add('open');
+  function openCountry(f){if(!f)return;mode='country';curFeat=f;resetTabs();centerPanel();panel.classList.add('open');
     var iso=f.id,nm=(DATA[iso]&&DATA[iso].name)||f.properties.name;
     lastFit=Date.now();try{map.fitBounds(featBounds(f),{maxZoom:5,padding:[50,50]});}catch(e){}render();}
   function featBounds(f){try{var lo=Infinity,hi=-Infinity;(function scan(c){if(typeof c[0]==='number'){if(c[0]<lo)lo=c[0];if(c[0]>hi)hi=c[0];}else{for(var i=0;i<c.length;i++)scan(c[i]);}})(f.geometry.coordinates);if(hi-lo>180){var g=JSON.parse(JSON.stringify(f));(function sh(c){if(typeof c[0]==='number'){if(c[0]<0)c[0]+=360;}else{for(var i=0;i<c.length;i++)sh(c[i]);}})(g.geometry.coordinates);return L.geoJSON(g).getBounds();}}catch(e){}return L.geoJSON(f).getBounds();}
 
   function openUnit(iso,cname,lvl,nm,bounds){mode='unit';curUnit={iso:iso,cname:cname,lvl:lvl,nm:nm,bounds:bounds};
-    resetTabs();panel.classList.add('open');lastFit=Date.now();try{map.fitBounds(bounds,{maxZoom:9,padding:[30,30]});}catch(e){}render();}
+    resetTabs();centerPanel();panel.classList.add('open');lastFit=Date.now();try{map.fitBounds(bounds,{maxZoom:9,padding:[30,30]});}catch(e){}render();}
 
   var TABDEF={leg:'<b>The lawmakers.</b> Elected to write the rules — this tab is how you get one of those seats.',exe:'<b>The leaders who carry the laws out.</b> Directly elected, chosen by the assembly you elect, or appointed from above — this tab says which.',jud:'<b>The judges.</b> They interpret and apply the law — and almost everywhere they are appointed, not elected.',civ:'<b>The permanent government staff.</b> Hired on merit rather than elected — they stay when governments change.'};
   function branchHTML(b,name){
